@@ -4,7 +4,9 @@ import (
 	"encoding/csv"
 	"fmt"
 	"log"
-	"os" 
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gocolly/colly/v2"
@@ -52,7 +54,10 @@ func main() {
 
 	startTime := time.Now()
 
+	var notifyDoneNum = 0
+
 	itemChan := make(chan jumiaItems)
+	notifyDoneChan := make(chan int)
 
 	file, err := os.Create("jumiaItems.csv")
 	if err != nil {
@@ -64,11 +69,19 @@ func main() {
 	defer csvWriter.Flush()
 
 	for index, category := range jumia {
-		go scrapeJumiaCategories(category, index, itemChan)
+		go scrapeJumiaCategories(category, index, &notifyDoneNum, itemChan, notifyDoneChan)
 	}
 
-	for item := range itemChan {
-		item.addToCsv(csvWriter)
+CHAN:
+	for {
+		select {
+		case item := <-itemChan:
+			item.addToCsv(csvWriter)
+		case notifyDoneNum = <-notifyDoneChan:   
+			if notifyDoneNum == 4 {
+				break CHAN
+			}
+		}
 	}
 
 	fmt.Printf("Process took %s", time.Since(startTime))
@@ -93,9 +106,11 @@ func getCategoryFromIndex(index int) string {
 	return "another category"
 }
 
-func scrapeJumiaCategories(categoryLink string, index int, itemChan chan jumiaItems) {
+func scrapeJumiaCategories(categoryLink string, index int, notifyDoneNum *int, itemChan chan<- jumiaItems, notifyDoneChan chan<- int) {
 
 	c := colly.NewCollector()
+	var lastPage int
+	var pageIndex string
 
 	c.OnHTML(".prd._fb", func(h *colly.HTMLElement) {
 		item := jumiaItems{}
@@ -110,13 +125,43 @@ func scrapeJumiaCategories(categoryLink string, index int, itemChan chan jumiaIt
 		item.Category = getCategoryFromIndex(index)
 
 		itemChan <- item
-
 	})
 
 	c.OnHTML(".pg-w a", func(h *colly.HTMLElement) {
+		// Get the last page
+		if lastPage == 0 {
+			if h.Attr("aria-label") == "Last Page" {
+				nextPage := h.Request.AbsoluteURL(h.Attr("href"))
+				pg := nextPage[len(nextPage)-2:]
+				if strings.HasPrefix(pg, "=") {
+					pg = pg[len(pg)-1:]
+				}
+
+				lp, err := strconv.Atoi(pg)
+
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				
+				if pageIndex == strconv.Itoa(lp) {
+					notifyDoneChan <- *notifyDoneNum + 1
+				} 
+
+				lastPage = lp
+			}
+		}
+
 		if h.Attr("aria-label") == "Next Page" {
-			nextPage := h.Request.AbsoluteURL(h.Attr("href")) 
+			nextPage := h.Request.AbsoluteURL(h.Attr("href"))
+			pg := nextPage[len(nextPage)-2:]
+			if strings.HasPrefix(pg, "=") {
+				pg = pg[len(pg)-1:]
+			}
+			pageIndex = pg
+
 			fmt.Println(nextPage)
+
 			c.Visit(nextPage)
 		}
 	})
