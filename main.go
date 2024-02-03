@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/gocolly/colly/v2"
 )
@@ -39,6 +40,8 @@ func checkElementAttr(h *colly.HTMLElement, query, attrName string) string {
 }
 
 func main() {
+
+	startTime := time.Now()
 
 	file, err := os.Create("jumiaItems.csv")
 	if err != nil {
@@ -75,6 +78,8 @@ func main() {
 	})
 
 	c.Visit("https://www.jumia.com.ng/mlp-fashion-deals/mens-fashion-accessories/")
+
+	fmt.Printf("Process took %s",time.Since(startTime))
 }
 
 func initCsvWriter(file *os.File) *csv.Writer {
