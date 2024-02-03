@@ -4,11 +4,19 @@ import (
 	"encoding/csv"
 	"fmt"
 	"log"
-	"os"
+	"os" 
 	"time"
 
 	"github.com/gocolly/colly/v2"
 )
+
+var jumia = []string{
+	"https://www.jumia.com.ng/electronic-accessories-supplies/",
+	"https://www.jumia.com.ng/camera-photo-accessories/",
+	"https://www.jumia.com.ng/electronic-supplies-power-protection/",
+	"https://www.jumia.com.ng/microphones/",
+	"https://www.jumia.com.ng/electronics-cables/",
+}
 
 type jumiaItems struct {
 	Name          string
@@ -17,11 +25,12 @@ type jumiaItems struct {
 	Discount      string
 	Image         string
 	Rating        string
+	Category      string
 	Merchant      string
 }
 
 func (j *jumiaItems) addToCsv(csvWriter *csv.Writer) {
-	row := []string{j.Name, j.DiscountPrice, j.OldPrice, j.Discount, j.Image, j.Rating, j.Merchant}
+	row := []string{j.Name, j.DiscountPrice, j.OldPrice, j.Discount, j.Image, j.Rating, j.Category, j.Merchant}
 	csvWriter.Write(row)
 }
 
@@ -43,6 +52,8 @@ func main() {
 
 	startTime := time.Now()
 
+	itemChan := make(chan jumiaItems)
+
 	file, err := os.Create("jumiaItems.csv")
 	if err != nil {
 		log.Fatal(err)
@@ -51,6 +62,38 @@ func main() {
 
 	csvWriter := initCsvWriter(file)
 	defer csvWriter.Flush()
+
+	for index, category := range jumia {
+		go scrapeJumiaCategories(category, index, itemChan)
+	}
+
+	for item := range itemChan {
+		item.addToCsv(csvWriter)
+	}
+
+	fmt.Printf("Process took %s", time.Since(startTime))
+}
+
+func getCategoryFromIndex(index int) string {
+	if index == 0 {
+		return "electronic accessories supplies"
+	}
+	if index == 1 {
+		return "camera photo accessories"
+	}
+	if index == 2 {
+		return "electronic supplies power protection"
+	}
+	if index == 3 {
+		return "microphones"
+	}
+	if index == 4 {
+		return "electronic cables"
+	}
+	return "another category"
+}
+
+func scrapeJumiaCategories(categoryLink string, index int, itemChan chan jumiaItems) {
 
 	c := colly.NewCollector()
 
@@ -64,28 +107,28 @@ func main() {
 		item.OldPrice = checkElementText(h, ".old")
 		item.Discount = checkElementText(h, "._dsct")
 		item.Rating = checkElementText(h, ".rev")
+		item.Category = getCategoryFromIndex(index)
 
-		item.addToCsv(csvWriter)
+		itemChan <- item
 
 	})
 
 	c.OnHTML(".pg-w a", func(h *colly.HTMLElement) {
 		if h.Attr("aria-label") == "Next Page" {
-			nextPage := h.Request.AbsoluteURL(h.Attr("href"))
+			nextPage := h.Request.AbsoluteURL(h.Attr("href")) 
 			fmt.Println(nextPage)
 			c.Visit(nextPage)
 		}
 	})
 
-	c.Visit("https://www.jumia.com.ng/mlp-fashion-deals/mens-fashion-accessories/")
+	c.Visit(categoryLink)
 
-	fmt.Printf("Process took %s",time.Since(startTime))
 }
 
 func initCsvWriter(file *os.File) *csv.Writer {
 	writer := csv.NewWriter(file)
 
-	headers := []string{"name", "discountPrice", "oldPrice", "discount", "image", "rating", "merchant"}
+	headers := []string{"name", "discountPrice", "oldPrice", "discount", "image", "rating", "category", "merchant"}
 	writer.Write(headers)
 
 	return writer
